@@ -31,10 +31,13 @@ def getHomographyMatrix(p1, p2):
 
 
 def getRansacHomography(p1, p2):
+    # filter zeros
+    # p1, p2 = zip(*((point1, point2) for point1, point2 in zip(p1, p2) if point1 != [0,0] and point2 != [0,0]))
+
     inliersCount = 0
-    bestInliersCount = 0
+    bestInliersCount = -1
     bestmodel = 0
-    for cycle in range(0, 2500):
+    for cycle in range(0, 10000):
         # setup
         inliersCount = 0
         # chose random 4 points
@@ -45,26 +48,27 @@ def getRansacHomography(p1, p2):
             possibleInliersP1.append(p1[index])
             possibleInliersP2.append(p2[index])
 
-        # calculate homography NOTE: so far i am using cv2 homography
-
+        # calculate homography NOTE: so far i am using cv2 homography (its faster and the matrix loo nicer)
         # homography = getHomographyMatrix(possibleInliersP1, possibleInliersP2)
         # homographyTransposed = homography.transpose()
-
         homography, status = cv2.findHomography(np.matrix(possibleInliersP1), np.matrix(possibleInliersP2))
+        if homography is None:
+            continue    
         homographyTransposed = homography.transpose()
 
-        # find how many points fit the model with tolerance eps
+        # find how many points fit the model with tolerance eps = 20
         for (point1, point2) in zip(p1, p2):
             point3d = np.matrix([point1[0], point1[1], 1])
             transformed = np.matmul(point3d, homographyTransposed)[0:1, 0:2]
             distance = get2PointsDistance(transformed, point2)
+            # print(f"transformed point1: {transformed} --- point2: {point2}, Distance: {round(distance, 4)}")
             if distance < 20:
                 inliersCount += 1
         if inliersCount > bestInliersCount:
             bestInliersCount = inliersCount
             bestmodel = homography
         # repeat and find best fit
-    print(bestmodel)
+
     inliersP1 = []
     inliersP2 = []
     for (point1, point2) in zip(p1, p2):
@@ -72,14 +76,17 @@ def getRansacHomography(p1, p2):
         transformed = np.matmul(point3d, bestmodel.transpose())[0:1, 0:2]
         distance = get2PointsDistance(transformed, point2)
         if distance < 20:
-            print(f"transformed:{transformed} vs {point2}, distance: {distance}")
+            # print(f"transformed point1: {transformed} --- point2: {point2}, Distance: {round(distance, 4)}")
             inliersP1.append(point1)
             inliersP2.append(point2)
-    finalHomography, status = cv2.findHomography(np.matrix(inliersP1), np.matrix(inliersP2))
-    return finalHomography
+    if len(inliersP1) > 4:
+        finalHomography, status = cv2.findHomography(np.matrix(inliersP1), np.matrix(inliersP2))
+        if finalHomography is not None:
+            return finalHomography
+    return bestmodel
 
 
-main_path = ".\data\DownwardDog"
+main_path = ".\data\\Child"
 path_to_json = main_path + "\\Jsons\\"
 path_to_images = main_path + "\\Processed\\"
 path_to_aligned = main_path + "\\Aligned\\"
@@ -93,21 +100,26 @@ for file in json_files:
     points = divideChunks(keyPoints, 3)
     image = {
         "path": file,
-        "points": points,
+        "points": points[:15],
     }
     images.append(image)
 
 
+firstname = images[0]["path"][:-15]
+firstImg = cv2.imread(f"{path_to_images}\\{firstname}_rendered.png")
 # vezmu první image a všechny podle něj zarovnám
 for image in images[1:]:
-    homography = getRansacHomography(images[0]["points"], image["points"])
+    print(image["path"])
+    homography = getRansacHomography(image["points"], images[0]["points"])
     imageName = image["path"][:-15]
-    img = cv2.imread(f".\data\DownwardDog\Processed\\{imageName}_rendered.png")
-    out = cv2.warpPerspective(img, homography, (1920, 1080), flags=cv2.INTER_LINEAR)
-    # cv2.imshow("image window", img)
+    img = cv2.imread(f"{path_to_images}\\{imageName}_rendered.png")
+    out = cv2.warpPerspective(img, homography, (1920, 1080))
+
+    cv2.imwrite(f"{path_to_aligned}{imageName}_aligned.png", out)
+
+    # cv2.imshow("image window", firstImg)
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
     # cv2.imshow("image window", out)
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
-    cv2.imwrite(f"{path_to_aligned}{imageName}_aligned.png", out)
